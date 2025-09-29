@@ -1,9 +1,8 @@
 using CoachFit.Api.Models;
 
-namespace CoachFit.Api.Services
+namespace CoachFit.Api.Services;
+
+public interface IPlanService
 {
-    public interface IPlanService
-    {
-        PlanDto GeneratePlan(IntakeRequest intake);
-    }
+    PlanDto GeneratePlan(IntakeDto intake);
 }

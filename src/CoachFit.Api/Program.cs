@@ -1,12 +1,20 @@
-using CoachFit.Api;    
 using CoachFit.Api.Models;
 using CoachFit.Api.Services;
 using CoachFit.Api.Storage;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// JSON: enum as strings + camelCase everywhere
+builder.Services.ConfigureHttpJsonOptions(o =>
+{
+    o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
+});
 
 // CORS
 const string FrontendCors = "FrontendCors";
@@ -37,15 +45,17 @@ app.UseCors(FrontendCors);
 app.MapGet("/", () => Results.Ok(new { name = "CoachFitAI API", status = "ok" }));
 
 // Generate plan
-app.MapPost("/api/plan/generate", (IntakeRequest intake, IPlanService service, IPlanStore store) =>
+app.MapPost("/api/plan/generate", (IntakeDto intake, IPlanService service, IPlanStore store) =>
 {
-    var errs = IntakeValidator.Validate(intake);
-    if (errs.Count > 0) return Results.BadRequest(new { errors = errs });
+    var (ok, error) = IntakeGuard.Basic(intake);
+    if (!ok) return Results.BadRequest(new { error });
 
     var plan = service.GeneratePlan(intake);
     var id = store.Save(plan);
-    return Results.Ok(new PlanSavedResponse { PlanId = id, Plan = plan });
-});
+    return Results.Ok(new { planId = id, plan });
+})
+.WithName("GeneratePlan")
+.Produces<PlanDto>(StatusCodes.Status200OK);
 
 // Get plan by id
 app.MapGet("/api/plan/{id:guid}", (Guid id, IPlanStore store) =>
@@ -54,8 +64,15 @@ app.MapGet("/api/plan/{id:guid}", (Guid id, IPlanStore store) =>
 
 // Sample plan
 app.MapGet("/api/plan/sample", (IPlanService svc) =>
-    Results.Ok(svc.GeneratePlan(new IntakeRequest(30, "male", 175, 78, "moderate", "lose")))
-);
+{
+    var sample = new IntakeDto(
+        Gender.Male, Age: 30, WeightKg: 78, HeightCm: 175,
+        Goal.LoseFat, Level.Intermediate, BodyType.Mesomorph,
+        Restrictions: new[] { DietRestriction.LactoseFree },
+        DailyActivity.Moderate, PhotoUrl: null
+    );
+    return Results.Ok(svc.GeneratePlan(sample));
+});
 
 // Checkout stubs
 app.MapGet("/api/checkout/price", () => Results.Ok(new PriceResponse(7, "USD")));

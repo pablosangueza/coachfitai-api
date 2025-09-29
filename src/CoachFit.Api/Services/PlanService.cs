@@ -1,74 +1,97 @@
 using CoachFit.Api.Models;
 
-namespace CoachFit.Api.Services
+namespace CoachFit.Api.Services;
+
+public class PlanService : IPlanService
 {
-    public class PlanService : IPlanService
+    public PlanDto GeneratePlan(IntakeDto intake)
     {
-        public PlanDto GeneratePlan(IntakeRequest intake)
+        // BMR (Mifflin-St Jeor)
+        var bmr = intake.Gender switch
         {
-            var bmr = intake.Sex.ToLower() switch
+            Gender.Male   => 10 * intake.WeightKg + 6.25 * intake.HeightCm - 5 * intake.Age + 5,
+            Gender.Female => 10 * intake.WeightKg + 6.25 * intake.HeightCm - 5 * intake.Age - 161,
+            _             => 10 * intake.WeightKg + 6.25 * intake.HeightCm - 5 * intake.Age
+        };
+
+        var activityFactor = intake.DailyActivity switch
+        {
+            DailyActivity.Sedentary  => 1.2,
+            DailyActivity.Light      => 1.375,
+            DailyActivity.Moderate   => 1.55,
+            DailyActivity.Active     => 1.725,
+            DailyActivity.VeryActive => 1.9,
+            _ => 1.55
+        };
+
+        var tdee = bmr * activityFactor;
+
+        var delta = intake.Goal switch
+        {
+            Goal.LoseFat    => -400,
+            Goal.GainMuscle =>  300,
+            Goal.Recomp     => -100,
+            _               =>  0
+        };
+
+        var target = (int)Math.Round(tdee + delta);
+        var calRange = new CaloriesRangeDto(target - 100, target + 100);
+
+        // Simple macros
+        var protein = (int)Math.Round(intake.WeightKg * 2.0);
+        var fat     = (int)Math.Round(intake.WeightKg * 0.8);
+        var proteinKcal = protein * 4;
+        var fatKcal     = fat * 9;
+        var carbsKcal   = Math.Max(0, target - (proteinKcal + fatKcal));
+        var carbs       = (int)Math.Round(carbsKcal / 4.0);
+
+        var macros = new MacrosDto(protein, carbs, fat);
+
+        // Example stub nutrition
+        var weekly = new List<DayNutritionDto>
+        {
+            new("Mon", new[]
             {
-                "male" or "m" => 10 * intake.WeightKg + 6.25 * intake.HeightCm - 5 * intake.Age + 5,
-                _              => 10 * intake.WeightKg + 6.25 * intake.HeightCm - 5 * intake.Age - 161
-            };
+                new MealDto("Breakfast", new[]{ new IngredientDto("Oats", 60), new("Egg whites",150) }, 450),
+                new MealDto("Lunch",     new[]{ new IngredientDto("Chicken breast",180), new("Rice",150), new("Broccoli",120) }, 620),
+                new MealDto("Dinner",    new[]{ new IngredientDto("Salmon",160), new("Quinoa",140), new("Salad",120) }, 680),
+            })
+        };
 
-            var activityFactor = intake.ActivityLevel.ToLower() switch
-            {
-                "sedentary" => 1.2,
-                "light"     => 1.375,
-                "moderate"  => 1.55,
-                "high"      => 1.725,
-                _           => 1.375
-            };
+        var shopping = new List<ShoppingItemDto>
+        {
+            new("Chicken breast","1.5 kg"),
+            new("Rice","2 kg"),
+            new("Oats","1 kg"),
+            new("Eggs / egg whites","2 dozen"),
+            new("Veggies assorted","2 kg")
+        };
 
-            var tdee = bmr * activityFactor;
+        // Example sessions
+        var sessions = new List<SessionDto>
+        {
+            new("Mon","Full Body", new[]{
+                new ExerciseDto("Squat",4,"8–10","Moderate"),
+                new ExerciseDto("Bench Press",4,"8–10","Moderate"),
+                new ExerciseDto("Plank",3,"60s","Easy")
+            },45),
+            new("Tue","Cardio Z2", new[]{
+                new ExerciseDto("Treadmill / Cycle",1,"30–40m","Easy")
+            },35),
+        };
 
-            var delta = intake.Goal.ToLower() switch
-            {
-                "lose" => -400,
-                "gain" =>  300,
-                _      =>  0
-            };
+        var assumptions = new[]
+        {
+            "Macros use ~2 g/kg protein, ~0.8 g/kg fat, carbs fill remainder.",
+            "Activity factor derived from reported daily activity."
+        };
 
-            var target = (int)Math.Round(tdee + delta);
-            var range  = new CaloriesRange { Min = target - 100, Max = target + 100 };
+        var warnings = new List<string>();
+        if (intake.Restrictions?.Count > 0)
+            warnings.Add("Nutrition items are examples; honor diet restrictions when generating final meals.");
 
-            var sessions = new List<SessionDto>
-            {
-                new(){ Day="Mon", Focus="Full body strength", DurationMin=45, Details="Compound lifts + core" },
-                new(){ Day="Tue", Focus="Low-intensity cardio", DurationMin=30, Details="Zone 2 walk/cycle" },
-                new(){ Day="Wed", Focus="Upper body", DurationMin=40, Details="Push/Pull supersets" },
-                new(){ Day="Thu", Focus="Mobility + core", DurationMin=25, Details="Hips, T-spine, plank" },
-                new(){ Day="Fri", Focus="Lower body", DurationMin=45, Details="Squat + posterior chain" },
-                new(){ Day="Sat", Focus="Intervals", DurationMin=20, Details="10 x 1:00 hard / 1:00 easy" },
-                new(){ Day="Sun", Focus="Active recovery", DurationMin=30, Details="Walk + light stretch" },
-            };
+        var summary = $"{intake.Goal} plan for {intake.Age}y {intake.Gender} at {intake.WeightKg}kg/{intake.HeightCm}cm; activity: {intake.DailyActivity}.";
 
-            var tips = new List<string>
-            {
-                "Prioritize 1.6–2.2 g protein per kg body weight.",
-                "80% whole foods; 20% flexible.",
-                "2–3L water/day; add electrolytes if sweating.",
-                "Sleep 7–9h; keep a consistent schedule."
-            };
-
-            var notes = new List<string>();
-            if (!string.IsNullOrWhiteSpace(intake.Injuries))
-                notes.Add($"Modify sessions due to injuries: {intake.Injuries}.");
-            if (!string.IsNullOrWhiteSpace(intake.Preferences))
-                notes.Add($"Preferences: {intake.Preferences}.");
-
-            return new PlanDto
-            {
-                Summary = $"{Cap(intake.Goal)} plan for {intake.Age}y {intake.Sex} at {intake.WeightKg}kg/{intake.HeightCm}cm (activity: {intake.ActivityLevel}).",
-                CaloriesPerDay = range,
-                Sessions = sessions,
-                NutritionTips = tips,
-                Notes = notes
-            };
-        }
-
-        private static string Cap(string s) =>
-            string.IsNullOrWhiteSpace(s) ? "" : char.ToUpper(s[0]) + s[1..].ToLower();
+        return new PlanDto(calRange, macros, weekly, shopping, 7, sessions, assumptions, warnings.ToArray(), summary);
     }
 }
